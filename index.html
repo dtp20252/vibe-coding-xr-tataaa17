@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <title>AR Radiography POV | XR Blocks with Gemini</title>
+    <title>Asisten Radiografi AR v3: AI Terintegrasi Gemini</title>
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
     <script>
@@ -32,282 +33,243 @@
 import * as THREE from 'three';
 import * as xb from 'xrblocks';
 
-const apiKey = ""; 
+const apiKey = ""; // Kunci API disediakan secara otomatis di runtime
 
 /**
- * Simulasi interaktif WebXR untuk panduan Radiografi AR.
- * Perbaikan: Menjamin interaktivitas panel UI dengan isRoot dan updateLayouts.
+ * RadiographyARAssistant - Simulasi Radiografi Lanjut dengan Gemini AI
  */
-class RadiographyPOV extends xb.Script {
+class RadiographyARAssistant extends xb.Script {
   constructor() {
     super();
-    this.patientGroup = new THREE.Group();
-    this.flashOverlay = null;
-    this.statusText = null;
-    this.isCapturing = false;
-    this.aiPanel = null;
-    this.aiResponseText = null;
-    this.isAIThinking = false;
-
-    this.scanPlane = null;
-    this.isScanning = false;
-    this.scanProgress = 0;
+    this.isAIProcessing = false;
+    this.collimationScale = 1.0;
+    this.tubeHeight = 2.5;
+    this.lastResponse = "";
   }
 
   init() {
+    // 1. Pencahayaan
+    this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2));
+    const spotLight = new THREE.DirectionalLight(0xffffff, 2);
+    spotLight.position.set(1, 5, 2);
+    this.add(spotLight);
+
+    // 2. Lingkungan Fisik
+    this._createRadiologySuite();
+
+    // 3. Panduan AR Holografik
+    this._createHolographicGuides();
+
+    // 4. Spatial UI Panels
+    this._createFloatingHUD();
+    
     this.ai = xb.core.ai;
-    this.deviceCamera = xb.core.deviceCamera;
-
-    this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    directionalLight.position.set(2, 5, 2);
-    this.add(directionalLight);
-
-    this.createPhysicalScene();
-    this.createAROverlays();
-    this.createHUDPanels();
-    this.createAIAssistantPanel();
-    this.createFlashEffect();
-    this.createScanVisual();
-
-    this.patientGroup.position.set(0, 0, -1.2);
-    this.add(this.patientGroup);
   }
 
-  createPhysicalScene() {
-    const tableGeo = new THREE.BoxGeometry(0.9, 0.1, 2.2);
-    const tableMat = new THREE.MeshPhongMaterial({ color: 0xcccccc });
-    const table = new THREE.Mesh(tableGeo, tableMat);
-    table.position.y = 0.8;
-    this.patientGroup.add(table);
+  _createRadiologySuite() {
+    // Meja Radiologi
+    const tableGeometry = new THREE.BoxGeometry(2.2, 0.1, 0.8);
+    const tableMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+    const table = new THREE.Mesh(tableGeometry, tableMaterial);
+    table.position.set(0, 0.8, -1.5);
+    this.add(table);
 
-    const humanBody = new THREE.Group();
-    humanBody.position.y = 0.85;
-    const skinMat = new THREE.MeshPhongMaterial({ color: 0xe0ac69 });
+    // Model Pasien Tersegmentasi
+    const patientGroup = new THREE.Group();
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0ac69 });
+    const clothesMat = new THREE.MeshStandardMaterial({ color: 0xadd8e6 });
 
-    // Torso
-    const torsoGeo = new THREE.CapsuleGeometry(0.18, 0.6, 4, 12);
-    const torso = new THREE.Mesh(torsoGeo, skinMat);
-    torso.rotation.x = Math.PI / 2;
-    torso.position.y = 0.15;
-    humanBody.add(torso);
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.45), clothesMat);
+    torso.position.set(0, 0.11, 0);
+    patientGroup.add(torso);
 
-    // Kepala
-    const headGeo = new THREE.SphereGeometry(0.12, 16, 16);
-    const head = new THREE.Mesh(headGeo, skinMat);
-    head.position.set(0, 0.15, -0.45);
-    humanBody.add(head);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), skinMat);
+    head.position.set(0.4, 0.15, 0);
+    patientGroup.add(head);
 
-    // Anggota Tubuh
-    const armGeo = new THREE.CapsuleGeometry(0.06, 0.5, 4, 8);
-    const lArm = new THREE.Mesh(armGeo, skinMat);
-    lArm.rotation.x = Math.PI / 2; lArm.position.set(-0.25, 0.12, 0.05);
-    const rArm = new THREE.Mesh(armGeo, skinMat);
-    rArm.rotation.x = Math.PI / 2; rArm.position.set(0.25, 0.12, 0.05);
-    
-    const legGeo = new THREE.CapsuleGeometry(0.08, 0.7, 4, 8);
-    const lLeg = new THREE.Mesh(legGeo, skinMat);
-    lLeg.rotation.x = Math.PI / 2; lLeg.position.set(-0.1, 0.12, 0.7);
-    const rLeg = new THREE.Mesh(legGeo, skinMat);
-    rLeg.rotation.x = Math.PI / 2; rLeg.position.set(0.1, 0.12, 0.7);
+    const armGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.5);
+    const armR = new THREE.Mesh(armGeo, skinMat); armR.rotation.z = Math.PI / 2; armR.position.set(0, 0.1, 0.28);
+    const armL = new THREE.Mesh(armGeo, skinMat); armL.rotation.z = Math.PI / 2; armL.position.set(0, 0.1, -0.28);
+    patientGroup.add(armR); patientGroup.add(armL);
 
-    humanBody.add(lArm, rArm, lLeg, rLeg);
-    this.patientGroup.add(humanBody);
+    const legGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.7);
+    const legR = new THREE.Mesh(legGeo, clothesMat); legR.rotation.z = Math.PI / 2; legR.position.set(-0.6, 0.1, 0.12);
+    const legL = new THREE.Mesh(legGeo, clothesMat); legL.rotation.z = Math.PI / 2; legL.position.set(-0.6, 0.1, -0.12);
+    patientGroup.add(legR); patientGroup.add(legL);
 
-    // Tabung X-Ray
-    const tubeGroup = new THREE.Group();
-    const tubeMat = new THREE.MeshPhongMaterial({ color: 0x444444 });
-    const tubeHead = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.4), tubeMat);
-    const tubeArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0), tubeMat);
-    tubeArm.position.y = 0.6;
-    tubeGroup.add(tubeHead, tubeArm);
-    tubeGroup.position.set(0, 2.0, 0.2);
-    this.patientGroup.add(tubeGroup);
+    patientGroup.position.copy(table.position);
+    patientGroup.position.y += 0.05;
+    this.add(patientGroup);
+    this.patient = patientGroup;
+
+    // Tabung X-ray
+    this.tubeGroup = new THREE.Group();
+    const tubeGeo = new THREE.BoxGeometry(0.3, 0.4, 0.3);
+    const tubeMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+    const tubeHead = new THREE.Mesh(tubeGeo, tubeMat);
+    const coll = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, 0.2, 8), tubeMat);
+    coll.position.y = -0.3;
+    tubeHead.add(coll);
+    this.tubeGroup.add(tubeHead);
+    this.tubeGroup.position.set(0, this.tubeHeight, -1.5); 
+    this.add(this.tubeGroup);
   }
 
-  createAROverlays() {
-    const arAnchor = new THREE.Group();
-    arAnchor.position.set(0, 1.15, 0.2); 
-    this.patientGroup.add(arAnchor);
-
-    const ribsMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.5, wireframe: true });
+  _createHolographicGuides() {
+    this.arGuides = new THREE.Group();
+    const ribMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.5, wireframe: true });
     for(let i = 0; i < 5; i++) {
-        const rib = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.005, 16, 32), ribsMat);
-        rib.rotation.x = Math.PI / 2; rib.position.z = -0.1 + (i * 0.1);
-        arAnchor.add(rib);
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.008, 8, 32, Math.PI), ribMaterial);
+        rib.rotation.x = Math.PI / 2;
+        rib.position.set(0.15 - (i * 0.07), 0.25, 0);
+        this.arGuides.add(rib);
     }
-    arAnchor.add(new THREE.GridHelper(0.5, 4, 0x00ff88, 0x00ff88));
+    this.collimationGrid = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.45), new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.2, side: THREE.DoubleSide }));
+    this.collimationGrid.rotation.x = -Math.PI / 2;
+    this.collimationGrid.position.set(0, 0.23, 0);
+    this.arGuides.add(this.collimationGrid);
+    this.patient.add(this.arGuides);
   }
 
-  createHUDPanels() {
-    // Left Panel
-    const lPanel = new xb.SpatialPanel({ width: 0.6, height: 0.45, backgroundColor: '#111111ee' });
-    lPanel.isRoot = true; // Menandai sebagai panel utama untuk raycasting
-    lPanel.position.set(-0.8, 1.4, -0.9); // Posisi lebih dekat agar mudah diklik
-    lPanel.rotation.y = 0.4;
-    this.add(lPanel);
+  _createFloatingHUD() {
+    // 1. Info Pasien
+    const infoPanel = new xb.SpatialPanel({ width: 0.8, height: 0.5, backgroundColor: '#1a1a1acc' });
+    infoPanel.position.set(-1.1, 1.4, -1.5);
+    infoPanel.rotation.y = 0.4;
+    this.add(infoPanel);
+    infoPanel.addGrid().addRow().addText({ text: 'PASIEN: ALAN BHARATA\nJENIS: CHEST AP\nUSIA: 45 TAHUN', fontSize: 0.04, textAlign: 'left'});
 
-    const lGrid = lPanel.addGrid();
-    lGrid.addRow({weight: 0.2}).addText({ text: 'PROFIL PASIEN', fontColor: '#00ff88', fontSize: 0.04 });
-    lGrid.addRow({weight: 0.8}).addText({ 
-      text: 'Nama: Alan Bharata\nLahir: 15/05/1981\nID: XR-99281\nProsedur: Chest X-ray (AP)', 
-      fontSize: 0.035, textAlign: 'left' 
-    });
-    lPanel.updateLayouts(); // Penting: memperbarui area interaksi
+    // 2. Kontrol & AI
+    const controlPanel = new xb.SpatialPanel({ width: 1.3, height: 1.6, backgroundColor: '#1a1a1acc' });
+    controlPanel.position.set(1.2, 1.5, -1.5);
+    controlPanel.rotation.y = -0.4;
+    this.add(controlPanel);
 
-    // Right Panel (System Control)
-    const rPanel = new xb.SpatialPanel({ width: 0.7, height: 0.7, backgroundColor: '#111111ee' });
-    rPanel.isRoot = true;
-    rPanel.position.set(0.8, 1.4, -0.9);
-    rPanel.rotation.y = -0.4;
-    this.add(rPanel);
+    const cGrid = controlPanel.addGrid();
+    cGrid.addRow({weight: 0.1}).addText({ text: 'KONTROL RADIOGRAFI ✨', fontSize: 0.06, fontColor: '#00ff88'});
+    this.paramsText = cGrid.addRow({weight: 0.2}).addText({ text: '', fontSize: 0.035, textAlign: 'left'});
 
-    const rGrid = rPanel.addGrid();
-    rGrid.addRow({weight: 0.15}).addText({ text: 'KONTROL SISTEM', fontColor: '#00ff88', fontSize: 0.04 });
-    
-    this.statusText = rGrid.addRow({weight: 0.3}).addText({ 
-      text: 'Energi: 70 kV\nEksposur: 3.2 mAs\nSID: 180 cm\nStatus: SIAP', 
-      fontSize: 0.03, textAlign: 'left' 
-    });
+    // Kontrol Fisik
+    const heightRow = cGrid.addRow({weight: 0.15});
+    heightRow.addCol({weight: 0.4}).addText({text: 'Tinggi (SID)', fontSize: 0.03});
+    heightRow.addCol({weight: 0.3}).addIconButton({text: 'add', fontSize: 0.4}).onTriggered = () => this.adjustTubeHeight(0.1);
+    heightRow.addCol({weight: 0.3}).addIconButton({text: 'remove', fontSize: 0.4}).onTriggered = () => this.adjustTubeHeight(-0.1);
 
-    const btnRow = rGrid.addRow({weight: 0.55});
-    const colMain = btnRow.addCol({weight: 0.6});
-    const colAI = btnRow.addCol({weight: 0.4});
+    const collRow = cGrid.addRow({weight: 0.15});
+    collRow.addCol({weight: 0.4}).addText({text: 'Kolimasi', fontSize: 0.03});
+    collRow.addCol({weight: 0.3}).addIconButton({text: 'zoom_in', fontSize: 0.4}).onTriggered = () => this.adjustCollimation(0.1);
+    collRow.addCol({weight: 0.3}).addIconButton({text: 'zoom_out', fontSize: 0.4}).onTriggered = () => this.adjustCollimation(-0.1);
 
-    const captureBtn = colMain.addRow({weight: 0.5}).addTextButton({
-        text: 'AMBIL GAMBAR', backgroundColor: '#cc0000', fontColor: '#ffffff', fontSize: 0.12
-    });
-    captureBtn.onTriggered = () => this.captureXray();
+    // Tombol AI
+    const aiRow = cGrid.addRow({weight: 0.2});
+    this.btnCheck = aiRow.addCol({weight: 0.5}).addTextButton({ text: '✨ Cek Teknis', backgroundColor: '#4285f4', fontSize: 0.12 });
+    this.btnCheck.onTriggered = () => this.runAICheck();
 
-    const askProtocolBtn = colAI.addRow({weight: 0.5}).addTextButton({
-        text: '✨ Saran AI', backgroundColor: '#4285f4', fontSize: 0.12
-    });
-    askProtocolBtn.onTriggered = () => this.queryGemini("Berikan saran singkat protokol Radiografi Dada AP pasien pria 45thn.");
+    this.btnEdu = aiRow.addCol({weight: 0.5}).addTextButton({ text: '✨ Edukasi Pasien', backgroundColor: '#34a853', fontSize: 0.12 });
+    this.btnEdu.onTriggered = () => this.runAIEducation();
 
-    const checkAlignBtn = colMain.addRow({weight: 0.5}).addTextButton({
-        text: '✨ Cek Posisi', backgroundColor: '#34a853', fontSize: 0.12
-    });
-    checkAlignBtn.onTriggered = () => this.checkPositionWithAI();
+    const shootRow = cGrid.addRow({weight: 0.2});
+    this.shootButton = shootRow.addTextButton({ text: '📸 EKSPOS SEKARANG', backgroundColor: '#db4437', fontSize: 0.15 });
+    this.shootButton.onTriggered = () => this.triggerExposure();
 
-    rPanel.updateLayouts(); // Penting
-  }
-
-  createAIAssistantPanel() {
-    this.aiPanel = new xb.SpatialPanel({ width: 1.2, height: 0.4, backgroundColor: '#1a1a1acc' });
-    this.aiPanel.position.set(0, 2.0, -1.3);
+    // 3. Panel Output AI
+    this.aiPanel = new xb.SpatialPanel({ width: 1.6, height: 0.8, backgroundColor: '#2b2b2baa' });
+    this.aiPanel.position.set(0, 2.3, -2.5);
     this.add(this.aiPanel);
-
-    const grid = this.aiPanel.addGrid();
-    grid.addRow({weight: 0.25}).addText({ text: '✨ ASISTEN RADIOLOGI GEMINI', fontColor: '#4285f4', fontSize: 0.05 });
-    
-    this.aiResponseText = grid.addRow({weight: 0.75}).addText({ 
-      text: 'Menunggu instruksi...', 
-      fontSize: 0.035, textAlign: 'center' 
-    });
-    this.aiPanel.updateLayouts();
+    const aiGrid = this.aiPanel.addGrid();
+    aiGrid.addRow({weight: 0.2}).addText({ text: '✨ ASISTEN AI GEMINI', fontSize: 0.05, fontColor: '#66ccff'});
+    this.aiResponseView = aiGrid.addRow({weight: 0.8}).addText({ text: 'Siap membantu prosedur...', fontSize: 0.03, textAlign: 'left' });
   }
 
-  createFlashEffect() {
-    this.flashOverlay = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20), 
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 })
-    );
-    this.flashOverlay.position.z = -0.5;
-    this.add(this.flashOverlay);
+  adjustTubeHeight(val) {
+    this.tubeHeight = Math.max(1.5, Math.min(3.5, this.tubeHeight + val));
+    this.tubeGroup.position.y = this.tubeHeight;
   }
 
-  createScanVisual() {
-    const geo = new THREE.PlaneGeometry(0.5, 0.05);
-    const mat = new THREE.MeshBasicMaterial({ 
-        color: 0x00ff88, 
-        transparent: true, 
-        opacity: 0, 
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending 
-    });
-    this.scanPlane = new THREE.Mesh(geo, mat);
-    this.scanPlane.rotation.x = Math.PI / 2;
-    this.patientGroup.add(this.scanPlane);
+  adjustCollimation(val) {
+    this.collimationScale = Math.max(0.5, Math.min(1.5, this.collimationScale + val));
+    this.collimationGrid.scale.set(this.collimationScale, this.collimationScale, 1);
   }
 
-  async queryGemini(prompt, isImage = false, imageData = null) {
-    if (this.isAIThinking || !this.ai?.isAvailable()) return;
-    
-    this.isAIThinking = true;
-    this.aiResponseText.setText("✨ AI sedang berpikir...");
+  triggerExposure() {
+    const flash = new THREE.PointLight(0xffffff, 150, 15);
+    flash.position.copy(this.tubeGroup.position);
+    this.add(flash);
+    this.aiResponseView.setText("✅ Eksposur Selesai. Data dikirim ke PACS.");
+    setTimeout(() => { this.remove(flash); }, 150);
+  }
+
+  /**
+   * Fitur ✨ Cek Teknis: Analisis SID dan Kolimasi oleh Gemini
+   */
+  async runAICheck() {
+    if (this.isAIProcessing) return;
+    this.isAIProcessing = true;
+    this.btnCheck.setText('⏳...');
+    this.aiResponseView.setText('Sedang menganalisis parameter teknis...');
+
+    const prompt = `Anda adalah asisten radiologi AI. Parameter saat ini: SID=${Math.round(this.tubeHeight * 72)}cm, Skala Kolimasi=${this.collimationScale.toFixed(1)}. Berikan analisis singkat dalam Bahasa Indonesia apakah ini ideal untuk rontgen Chest AP. Jika tidak, beri saran perbaikan.`;
 
     try {
-        let parts = [{ text: prompt }];
-        if (isImage && imageData) {
-            const { strippedBase64, mimeType } = xb.parseBase64DataURL(imageData);
-            parts.unshift({ inlineData: { mimeType: mimeType, data: strippedBase64 } });
-        }
-
-        const response = await this.ai.query({
-            type: 'multiPart',
-            parts: parts,
-            systemInstruction: "Anda adalah asisten radiologi AR profesional. Berikan jawaban teknis sangat singkat dalam Bahasa Indonesia."
-        });
-        this.aiResponseText.setText(response.text);
-    } catch (err) {
-        this.aiResponseText.setText("❌ Gangguan koneksi AI.");
+      const response = await this._callGemini(prompt);
+      this.aiResponseView.setText(`[TEKNIS] ${response}`);
+    } catch (e) {
+      this.aiResponseView.setText("❌ Gangguan koneksi AI.");
     } finally {
-        this.isAIThinking = false;
+      this.isAIProcessing = false;
+      this.btnCheck.setText('✨ Cek Teknis');
     }
   }
 
-  async checkPositionWithAI() {
-    if (!this.deviceCamera) return;
-    this.aiResponseText.setText("✨ Memindai area: CHEST / THORAX...");
-    
-    const snapshot = this.deviceCamera.getSnapshot({outputFormat: 'base64'});
-    setTimeout(() => {
-        this.queryGemini(
-            "Analisis gambar AR Thorax ini. Konfirmasi apakah grid hijau sejajar garis tengah dada? Jawab ya/tidak singkat.", 
-            true, 
-            snapshot
-        );
-    }, 800);
+  /**
+   * Fitur ✨ Edukasi Pasien: Membuat draf penjelasan untuk pasien
+   */
+  async runAIEducation() {
+    if (this.isAIProcessing) return;
+    this.isAIProcessing = true;
+    this.btnEdu.setText('⏳...');
+    this.aiResponseView.setText('Menyusun draf penjelasan untuk pasien...');
+
+    const prompt = `Buat draf penjelasan yang sangat ramah dan menenangkan dalam Bahasa Indonesia untuk pasien bernama Alan Bharata (45 thn) yang akan menjalani rontgen dada AP. Jelaskan mengapa ia harus diam dan apa gunanya prosedur ini. Maksimal 3 kalimat.`;
+
+    try {
+      const response = await this._callGemini(prompt);
+      this.aiResponseView.setText(`[EDUKASI] ${response}`);
+    } catch (e) {
+      this.aiResponseView.setText("❌ Gangguan koneksi AI.");
+    } finally {
+      this.isAIProcessing = false;
+      this.btnEdu.setText('✨ Edukasi Pasien');
+    }
   }
 
-  captureXray() {
-    if (this.isCapturing) return;
-    this.isCapturing = true;
-    this.isScanning = true;
-    this.scanProgress = 0;
-    this.scanPlane.material.opacity = 0.8;
-    this.statusText.setText('Status: SCANNING...');
-    
-    setTimeout(() => {
-        this.isScanning = false;
-        this.scanPlane.material.opacity = 0;
-        this.flashOverlay.material.opacity = 1.0; 
-        this.statusText.setText('Status: GAMBAR DISIMPAN');
-        this.isCapturing = false;
-        this.queryGemini("Tulis laporan singkat: Chest X-ray Thorax AP, 70kV, 3.2mAs. Sukses.");
-        setTimeout(() => this.statusText.setText('Status: SIAP'), 3000);
-    }, 1500);
+  async _callGemini(prompt) {
+    let lastError;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const result = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+        const data = await result.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "Maaf, AI tidak memberikan respon.";
+      } catch (err) {
+        lastError = err;
+        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+      }
+    }
+    throw lastError;
   }
 
   update() {
     const time = performance.now() * 0.002;
-    const scale = 1.0 + Math.sin(time) * 0.015;
-    
-    this.patientGroup.children.forEach(c => {
-        if(c.type === "Group" && c.children.length > 3) c.scale.set(scale, scale, scale);
-    });
-
-    if (this.isScanning) {
-        this.scanProgress += 0.015;
-        if (this.scanProgress > 1.0) this.scanProgress = 0;
-        this.scanPlane.position.set(0, 1.1, -0.2 + (this.scanProgress * 0.8));
+    if (this.patient) {
+        this.patient.children[0].scale.y = 1 + Math.sin(time * 0.5) * 0.02;
     }
-
-    if (this.flashOverlay && this.flashOverlay.material.opacity > 0) {
-        this.flashOverlay.material.opacity -= 0.05;
-        this.flashOverlay.position.copy(xb.core.camera.position);
-        this.flashOverlay.quaternion.copy(xb.core.camera.quaternion);
-        this.flashOverlay.translateZ(-0.5);
+    if (this.paramsText) {
+        const sid = Math.round(this.tubeHeight * 72);
+        this.paramsText.setText(`SID: ${sid} cm\nKolimasi: ${this.collimationScale.toFixed(1)}x\nStatus: SIAP`);
     }
   }
 }
@@ -316,19 +278,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const options = new xb.Options();
   options.enableUI();
   options.enableAI();
-  options.enableCamera('environment');
-  
-  options.reticles.enabled = true;
-  options.controllers.visualizeRays = true;
-  
-  // Memastikan simulator dalam mode yang mudah untuk diklik
-  options.simulator.defaultMode = xb.SimulatorMode.POSE;
-  
-  options.setAppTitle('Radiography AR with Scanning FX');
-  xb.add(new RadiographyPOV());
+  options.enableReticles();
+  options.setAppTitle('MedXR v3: Intelligent Radiography');
+  xb.add(new RadiographyARAssistant());
   xb.init(options);
 });
-
 </script>
   </body>
 </html>
